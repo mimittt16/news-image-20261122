@@ -33,6 +33,32 @@ if (bytes.subarray(12, 16).toString('ascii') !== 'IHDR') {
   throw new Error('entry.png has no IHDR chunk where the header should be');
 }
 
+// Verify the IHDR chunk's CRC32, so a corrupted header is refused, and
+// confirm the file ends with a proper IEND trailer, so a truncated PNG
+// is refused. CRC32 (IEEE 802.3) over the chunk type + data.
+const crcTable = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+const crc32 = (buf) => {
+  let c = 0xffffffff;
+  for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+};
+const ihdrCrc = bytes.readUInt32BE(29);
+if (crc32(bytes.subarray(12, 29)) !== ihdrCrc) {
+  throw new Error('entry.png IHDR chunk CRC mismatch');
+}
+const iend = bytes.subarray(bytes.length - 12);
+if (iend.readUInt32BE(0) !== 0 || iend.subarray(4, 8).toString('ascii') !== 'IEND') {
+  throw new Error('entry.png has no IEND trailer');
+}
+
 mkdirSync(outDir, { recursive: true });
 copyFileSync(source, join(outDir, 'entry.png'));
 const written = statSync(join(outDir, 'entry.png')).size;
